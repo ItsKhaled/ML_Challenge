@@ -5,6 +5,10 @@ import matplotlib.pyplot as plt
 
 from scipy.stats import kurtosis, skew
 from matplotlib.colors import LinearSegmentedColormap
+from matplotlib.patches import Patch
+from matplotlib.lines import Line2D
+from sklearn.model_selection import *
+from sklearn.metrics import *
 
 '''
 load_features(vals)
@@ -87,6 +91,7 @@ def plot_sorted_counts(data, label, xtick=True, rot=90, sorted=True, coloring=No
     # Count values without sorting
     else:
         values, counts = np.unique(data, return_counts=True)
+        print(values,counts)
 
     # Adjust size
     plt.figure(figsize=(10, 6))
@@ -321,4 +326,147 @@ def analyze(X, features, title, labels, scaler=None):
         plt.title(title + ' - ' + features[i])
 
     plt.tight_layout()
+    plt.show()
+    
+    
+'''
+Function used in lab. Used in error analysis function
+'''
+def plot_learning_curve(sizes, train, val):
+    
+    train_scores_mean = np.mean(train, axis=1)
+    train_scores_std = np.std(train, axis=1)
+    val_scores_mean = np.mean(val, axis=1)
+    val_scores_std = np.std(val, axis=1)
+
+    _, axes = plt.subplots(1,)
+    axes.grid()
+    
+    axes.fill_between(
+        sizes,
+        train_scores_mean - train_scores_std,
+        train_scores_mean + train_scores_std,
+        alpha=0.1,
+        color="g",
+    )
+    
+    axes.fill_between(
+        sizes,
+        val_scores_mean - val_scores_std,
+        val_scores_mean + val_scores_std,
+        alpha=0.1,
+        color="r",
+    )
+    
+    axes.plot(
+        sizes, train_scores_mean, "o-", color="g", label="Training score"
+    )
+    
+    axes.plot(
+        sizes, val_scores_mean, "o-", color="r", label="Cross-validation score"
+    )
+    
+    axes.set_ylim((0,1))
+    axes.legend(loc="best")
+    
+    plt.title('Learning Curve')
+    plt.show()
+    
+    return
+
+
+'''
+error_analysis(model, Xtrain, Ytrain, cv)
+
+model: model pipeline used for error analysis [sklearn model pipeline]
+Xtrain: Training values [pd Dataframe]
+Ytrain: Training labels [pd Dataframe]
+cv: Cross validation technique used [sklearn technique]
+'''
+def error_analysis(model, Xtrain, Ytrain, cv):
+    
+    '''
+    Plotting learning curve
+    '''
+    # Get learning curve values
+    train_sizes, train_scores, val_scores = learning_curve(model, Xtrain, Ytrain, cv=cv, n_jobs=4, verbose=0)
+    
+    # Plot the curve
+    plot_learning_curve(train_sizes, train_scores, val_scores)
+    
+
+    '''
+    Error analysis
+    '''
+    # Get validation results from cross validation
+    Yval = cross_val_predict(model, Xtrain, y=Ytrain, cv=cv, n_jobs=4, verbose=0)
+    
+    # Get error analysis values from validation results
+    p, r, F, sup = precision_recall_fscore_support(Ytrain, Yval)
+    validation_results = pd.DataFrame({'precision':p,'recall':r,'F1-score':F,'support':sup})
+
+    # Add the group labels for each of the errors analysis values
+    groups = pd.DataFrame({'group': ['DAQ_1', 'DAQ_10', 'DAQ_11', 'DAQ_2', 'DAQ_3', 'DAQ_4', 'DAQ_5', 'DAQ_6', 'DAQ_7', 'DAQ_8', 'DAQ_9']})
+    
+    validation_results = pd.concat([validation_results, groups], axis = 1)
+    validation_results.set_index('group', inplace=True)
+    validation_results.sort_values(by='precision', inplace=True, ascending=False)
+
+    
+    print('\n\n')
+
+
+    ''' 
+    Plot bars for error analysis 
+    '''
+    
+    ax = validation_results[['precision', 'recall', 'F1-score']].plot.bar(figsize=(10, 6), rot=0)
+
+    for i, (index, row) in enumerate(validation_results.iterrows()):
+        for j, value in enumerate(row[['precision', 'recall', 'F1-score']]):
+            if j == 0:
+                ax.text(i + j * 0.2, value - 0.1, f"{int(row['support'])}", ha='center', va='bottom', fontsize=20, color='k')
+
+    ax.set_xlabel('Group')
+    ax.set_ylabel('Score')
+    ax.set_title('Precision, Recall, F1-score, and Support by Group label')
+
+    handles, labels = ax.get_legend_handles_labels()
+    support_legend_entry = Line2D([0], [0], marker='', color='k', label='Support', markersize=10, linestyle='-')
+
+    handles.append(support_legend_entry)
+    labels.append('Support')
+
+    ax.legend(handles=handles, labels=labels, loc='upper left', bbox_to_anchor=(1, 1))
+    
+    plt.tight_layout()
+    plt.show()
+    
+    
+    print('\n\n')
+
+    
+    '''
+    Plot scatter for error analysis
+    '''
+    
+    validation_results.plot.scatter(x='precision', y='recall', c='support', colormap='viridis', s=50)
+
+    plt.tight_layout()
+    plt.title('Precision and Recall scatter')
+    plt.show()
+    
+    
+    print('\n\n')
+    
+    '''
+    Plot Confusion Matrix
+    '''
+    
+
+    fig, ax = plt.subplots(figsize=(11, 8))
+
+    ConfusionMatrixDisplay.from_predictions(Ytrain, Yval, include_values=True,normalize='true', xticks_rotation=45, ax=ax)
+
+    plt.title('Confusion Matrix')
     plt.show()
