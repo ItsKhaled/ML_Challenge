@@ -329,7 +329,9 @@ def analyze(X, features, title, labels, scaler=None):
     plt.show()
     
     
-    
+'''
+Function used in lab. Used in error analysis function
+'''
 def plot_learning_curve(sizes, train, val):
     
     train_scores_mean = np.mean(train, axis=1)
@@ -367,12 +369,21 @@ def plot_learning_curve(sizes, train, val):
     axes.set_ylim((0,1))
     axes.legend(loc="best")
     
+    plt.title('Learning Curve')
     plt.show()
     
     return
 
+
+'''
+error_analysis(model, Xtrain, Ytrain, cv)
+
+model: model pipeline used for error analysis [sklearn model pipeline]
+Xtrain: Training values [pd Dataframe]
+Ytrain: Training labels [pd Dataframe]
+cv: Cross validation technique used [sklearn technique]
+'''
 def error_analysis(model, Xtrain, Ytrain, cv):
-    
     
     '''
     Plotting learning curve
@@ -382,8 +393,7 @@ def error_analysis(model, Xtrain, Ytrain, cv):
     
     # Plot the curve
     plot_learning_curve(train_sizes, train_scores, val_scores)
-
-
+    
 
     '''
     Error analysis
@@ -392,7 +402,7 @@ def error_analysis(model, Xtrain, Ytrain, cv):
     Yval = cross_val_predict(model, Xtrain, y=Ytrain, cv=cv, n_jobs=4, verbose=0)
     
     # Get error analysis values from validation results
-    p, r, F, sup = precision_recall_fscore_support(Ytrain, y_val)
+    p, r, F, sup = precision_recall_fscore_support(Ytrain, Yval)
     validation_results = pd.DataFrame({'precision':p,'recall':r,'F1-score':F,'support':sup})
 
     # Add the group labels for each of the errors analysis values
@@ -402,6 +412,8 @@ def error_analysis(model, Xtrain, Ytrain, cv):
     validation_results.set_index('group', inplace=True)
     validation_results.sort_values(by='precision', inplace=True, ascending=False)
 
+    
+    print('\n\n')
 
 
     ''' 
@@ -426,10 +438,13 @@ def error_analysis(model, Xtrain, Ytrain, cv):
     labels.append('Support')
 
     ax.legend(handles=handles, labels=labels, loc='upper left', bbox_to_anchor=(1, 1))
-
+    
+    plt.tight_layout()
     plt.show()
     
     
+    print('\n\n')
+
     
     '''
     Plot scatter for error analysis
@@ -437,16 +452,21 @@ def error_analysis(model, Xtrain, Ytrain, cv):
     
     validation_results.plot.scatter(x='precision', y='recall', c='support', colormap='viridis', s=50)
 
+    plt.tight_layout()
     plt.title('Precision and Recall scatter')
     plt.show()
     
     
+    print('\n\n')
     
     '''
     Plot Confusion Matrix
     '''
     
-    ConfusionMatrixDisplay.from_predictions(Ytrain, y_val, include_values=False,normalize='true', xticks_rotation=45)
+
+    fig, ax = plt.subplots(figsize=(11, 8))
+
+    ConfusionMatrixDisplay.from_predictions(Ytrain, Yval, include_values=True,normalize='true', xticks_rotation=45, ax=ax)
 
     plt.title('Confusion Matrix')
     plt.show()
