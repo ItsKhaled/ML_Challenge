@@ -9,6 +9,7 @@ from matplotlib.patches import Patch
 from matplotlib.lines import Line2D
 from sklearn.model_selection import *
 from sklearn.metrics import *
+from datetime import datetime
 
 '''
 load_features(vals)
@@ -181,7 +182,7 @@ window_start: wave window start index [integer]
 window_end: wave window end index [integer]
 wave: integer specifying which wave (low, high, acceleration) [integer - {0, 1, 2}]
 '''
-def get_wave_stats(window_start, window_end, wave):
+def get_wave_stats(window_start, window_end, wave, test=False):
     
     column_names = ['min_amplitude','max_amplitude', 'mean_aplitude', 'q_25', 'median_amplitude', 'q_75', 'kurtosis', 'skewness', 'rms_amplitude', 'crest_factor']
 
@@ -189,7 +190,12 @@ def get_wave_stats(window_start, window_end, wave):
 
     for i in range(window_start, window_end):
         
-        X = load_features(i)
+        if test:
+            
+            X = load_features(i, test=True)
+            
+        else:
+            X = load_features(i)
         
         X = X.drop(X.columns[0], axis=1)
 
@@ -229,14 +235,20 @@ store_wave_features(store)
 
 store: Stores the obtained wave features in a excel file (works if file does not exist) [boolean - default=False]
 '''
-def store_wave_features(store = False):
+def store_wave_features(store = False, test=False):
     
     waves = ['low', 'high', 'acc']
     df = pd.DataFrame()
     
     for i in range(3):
         
-        wave_stats = get_wave_stats(0, 1100, i)
+        if test:
+            
+            wave_stats = get_wave_stats(0, 1100, i, True)
+        
+        else:
+            wave_stats = get_wave_stats(0, 1100, i, False)
+            
         wave_stats.columns = [waves[i] + '_' + col for col in wave_stats.columns]
         df = pd.concat([df, wave_stats], axis = 1)
 
@@ -383,6 +395,7 @@ Xtrain: Training values [pd Dataframe]
 Ytrain: Training labels [pd Dataframe]
 cv: Cross validation technique used [sklearn technique]
 '''
+            
 def error_analysis(model, Xtrain, Ytrain, cv):
     
     '''
@@ -406,12 +419,11 @@ def error_analysis(model, Xtrain, Ytrain, cv):
     validation_results = pd.DataFrame({'precision':p,'recall':r,'F1-score':F,'support':sup})
 
     # Add the group labels for each of the errors analysis values
-    groups = pd.DataFrame({'group': ['DAQ_1', 'DAQ_10', 'DAQ_11', 'DAQ_2', 'DAQ_3', 'DAQ_4', 'DAQ_5', 'DAQ_6', 'DAQ_7', 'DAQ_8', 'DAQ_9']})
+    groups = pd.DataFrame({'group': model.classes_})
     
     validation_results = pd.concat([validation_results, groups], axis = 1)
     validation_results.set_index('group', inplace=True)
     validation_results.sort_values(by='precision', inplace=True, ascending=False)
-
     
     print('\n\n')
 
@@ -459,10 +471,11 @@ def error_analysis(model, Xtrain, Ytrain, cv):
     
     print('\n\n')
     
+    
+    
     '''
     Plot Confusion Matrix
     '''
-    
 
     fig, ax = plt.subplots(figsize=(11, 8))
 
@@ -470,3 +483,33 @@ def error_analysis(model, Xtrain, Ytrain, cv):
 
     plt.title('Confusion Matrix')
     plt.show()
+    
+    
+'''
+predict_and_store(model, feature_extraction)
+model: Best model pipeline after training, used for predicting [sklearn model pipeline]
+feature_extraction: Function used to extract features from training data [python function]
+''' 
+## WARNING: The 'feature_extraction' parameter currently only works on my own function
+##          because of the specified parameters of the function I used
+def predict_and_store(model, feature_extraction):
+    
+    # Loads test data and extract the features, similarl to the train data
+    Xtest = feature_extraction(store = False, test=False)    
+    
+    # Use the model to make the predictions based on the test data
+    Ytest = model.predict(Xtest)
+    
+    # Create the dataframe and prepare it for submission
+    predictions = pd.DataFrame({'misalignment': Ytest})
+    predictions['id'] = range(len(predictions))
+    predictions = predictions[['id', 'misalignment']]
+    predictions['misalignment'] = predictions['misalignment'].astype(float)
+
+    # Name the prediction file with timestamp 
+    output_directory = '..//submissions'
+    timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+    output_filename = f"output_{timestamp}.csv"
+    
+    # Store the file in the submission folder
+    predictions.to_csv(os.path.join(output_directory, output_filename), index=False)
