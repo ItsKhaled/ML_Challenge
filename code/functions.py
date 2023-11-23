@@ -3,21 +3,23 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
-from scipy.stats import kurtosis, skew
 from matplotlib.colors import LinearSegmentedColormap
-from matplotlib.patches import Patch
 from matplotlib.lines import Line2D
 from sklearn.model_selection import *
 from sklearn.metrics import *
+from scipy import integrate
+from scipy.fft import rfft
 from datetime import datetime
+from scipy.stats import *
 
 '''
-load_features(vals)
+    load_features(vals)
 
-n: train file number (window in the time series) [integer - range{0-1099}]
-test: returns test values instead of train [boolean - default=False]
-vals: load as pd Dataframe or np 2d-array [boolean - default=False (df)]
+    - n: train file number (window in the time series) [integer - range{0-1099}]
+    - test: returns test values instead of train [boolean - default=False]
+    - vals: load as pd Dataframe or np 2d-array [boolean - default=False (df)]
 '''
+
 def load_features(n, test = False, vals = False):
     
     if test:
@@ -37,9 +39,9 @@ def load_features(n, test = False, vals = False):
     return features
 
 '''
-load_train_meta(vals)
+    load_train_meta(vals)
 
-vals: load as pd Dataframe or np 2d-array [boolean - default=False (df)]
+    - vals: load as pd Dataframe or np 2d-array [boolean - default=False (df)]
 '''
 def load_train_meta(vals = False):
     filename = 'train_meta'
@@ -53,9 +55,9 @@ def load_train_meta(vals = False):
     return features
 
 '''
-load_wave_features(vals)
+    load_wave_features(vals)
 
-vals: load as pd Dataframe or np 2d-array [boolean - default=False (df)]
+    - vals: load as pd Dataframe or np 2d-array [boolean - default=False (df)]
 '''
 def load_wave_features(vals = False):
     filename = 'wave_features'
@@ -69,14 +71,14 @@ def load_wave_features(vals = False):
     return features.iloc[: , 1:]
 
 ''' 
-plot_sorted_counts(data, label, xtick, rot, sorted, coloring)
+    plot_sorted_counts(data, label, xtick, rot, sorted, coloring)
 
-data: Data to plot [pd Dataframe]
-label: Y-axis label (variable to count) [string] 
-xtick: Show Xticks [boolean - default=True]
-rot: Rotation of Xticks [double - default=90]
-sorted: Sort in descending order [boolean - default=True]
-coloring: Coloring of bars (based on direction, speed, or default coloring) [string - possible values: 'spd', 'dir', None - default=None]
+    - data: Data to plot [pd Dataframe]
+    - label: Y-axis label (variable to count) [string] 
+    - xtick: Show Xticks [boolean - default=True]
+    - rot: Rotation of Xticks [double - default=90]
+    - sorted: Sort in descending order [boolean - default=True]
+    - coloring: Coloring of bars (based on direction, speed, or default coloring) [string - possible values: 'spd', 'dir', None - default=None]
 '''
 def plot_sorted_counts(data, label, xtick=True, rot=90, sorted=True, coloring=None):
 
@@ -141,14 +143,15 @@ def plot_sorted_counts(data, label, xtick=True, rot=90, sorted=True, coloring=No
     
     
 '''
-plot_series(start, end, low, high, acc)
+    plot_series(start, end, low, high, acc)
 
-start: wave window start index [integer]
-end: wave window end index [integer]
-low: plot low wave [boolean - default=False]
-high: plot high wave [boolean - default=False]
-acc: plot acceleration wave [boolean - default=True]
+    - start: wave window start index [integer]
+    - end: wave window end index [integer]
+    - low: plot low wave [boolean - default=False]
+    - high: plot high wave [boolean - default=False]
+    - acc: plot acceleration wave [boolean - default=True]
 '''
+
 def plot_series(start, end, low = False, high = False, acc = True):
     
     plt.figure(figsize=(12, 8))
@@ -176,52 +179,70 @@ def plot_series(start, end, low = False, high = False, acc = True):
     plt.show()
     
 '''
-get_wave_stats(window_start, window_end, wave):
+    get_wave_stats(window_start, window_end, wave):
 
-window_start: wave window start index [integer]
-window_end: wave window end index [integer]
-wave: integer specifying which wave (low, high, acceleration) [integer - {0, 1, 2}]
+    - window_start: wave window start index [integer]
+    - window_end: wave window end index [integer]
+    - wave: integer specifying which wave (low, high, acceleration) [integer - {0, 1, 2}]
 '''
 def get_wave_stats(window_start, window_end, wave, test=False):
     
-    column_names = ['min_amplitude','max_amplitude', 'mean_aplitude', 'q_25', 'median_amplitude', 'q_75', 'kurtosis', 'skewness', 'rms_amplitude', 'crest_factor']
-
+    column_names = ['min_amplitude','max_amplitude', 'mean_aplitude', 'variance', 'q_25', 'median_amplitude', 'q_75', 'kurtosis', 'skewness', 'rms_amplitude', 'crest_factor']
+        
     data_accumulator = []
 
     for i in range(window_start, window_end):
         
         if test:
-            
             X = load_features(i, test=True)
             
         else:
             X = load_features(i)
+                
+        if wave == 3:
+            
+            speed = np.real(integrate.cumulative_trapezoid(X[str(wave-1)], x = X.iloc[:,0]))
+            X['3'] = pd.DataFrame(np.transpose(speed))
+        
+        elif wave == 4:
+            
+            speed = np.real(integrate.cumulative_trapezoid(X[str(wave-2)], x = X.iloc[:,0]))            
+            position = np.real(integrate.cumulative_trapezoid(speed, x = X.iloc[1:,0]))
+            
+            X['4'] = pd.DataFrame(np.transpose(position))        
+        
+        elif wave >= 5:
+            
+            rft = np.abs(rfft(X[str(wave-5)].values-np.mean(X[str(wave-5)].values)))
+            X[str(wave)] = pd.DataFrame(np.transpose(rft))
+
         
         X = X.drop(X.columns[0], axis=1)
 
-        if i % 150 == 0:
-            print('Window', i)
+        if i % 200 == 0:
+            print('Wave', wave, 'at index', i)
         
-        sine_wave = X.iloc[:, wave]
-            
-        kurt = kurtosis(sine_wave)
+        sine_wave = X.iloc[:, min(wave,3)]
+        kurt = sine_wave.kurtosis()
         
-        skewness = skew(sine_wave)
+        skewness = sine_wave.skew()
 
         min_amplitude = np.min(sine_wave)
         max_amplitude = np.max(sine_wave)
 
         mean_amplitude = np.mean(sine_wave)
+
+        variance = np.var(sine_wave)
         
-        q_25 = np.percentile(sine_wave, 25)
-        median_amplitude = np.median(sine_wave)
-        q_75 = np.percentile(sine_wave, 75)
+        q_25 = sine_wave.quantile(q=0.25)
+        median_amplitude = sine_wave.quantile(q=0.5)
+        q_75 = sine_wave.quantile(q=0.75)
 
         rms_amplitude = np.sqrt(np.mean(sine_wave**2))
             
         crest_factor = max_amplitude / rms_amplitude
     
-        row = [min_amplitude, max_amplitude, mean_amplitude, q_25, median_amplitude, q_75, kurt, skewness,  rms_amplitude, crest_factor]
+        row = [min_amplitude, max_amplitude, mean_amplitude, variance, q_25, median_amplitude, q_75, kurt, skewness,  rms_amplitude, crest_factor]
         
         data_accumulator.append(row)
 
@@ -231,19 +252,17 @@ def get_wave_stats(window_start, window_end, wave, test=False):
     return df
 
 '''
-store_wave_features(store)
+    store_wave_features(store)
 
-store: Stores the obtained wave features in a excel file (works if file does not exist) [boolean - default=False]
+    - store: Stores the obtained wave features in a excel file (works if file does not exist) [boolean - default=False]
 '''
 def store_wave_features(store = False, test=False):
     
-    waves = ['low', 'high', 'acc']
+    waves = ['low', 'high', 'acc', 'spd', 'pos', 'rft0', 'rft1', 'rft2']
     df = pd.DataFrame()
     
-    for i in range(3):
-        
+    for i in range(len(waves)):
         if test:
-            
             wave_stats = get_wave_stats(0, 1100, i, True)
         
         else:
@@ -254,16 +273,16 @@ def store_wave_features(store = False, test=False):
 
     
     if store:
-        file_path = 'data//wave_features.csv'
+        file_path = '..//data//wave_features.csv'
         df.to_csv(file_path, index=True, mode='w')
     
     return df
 
 
 '''
-get_correlations(X) 
+    get_correlations(X) 
 
-X: Dataframe to display feature correlation in descending order [pd Dataframe]
+    - X: Dataframe to display feature correlation in descending order [pd Dataframe]
 '''
 def get_correlations(X):
 
@@ -286,13 +305,13 @@ def get_correlations(X):
         
         
 '''
-analyze(X, features, title, labels, scaler)
+    analyze(X, features, title, labels, scaler)
 
-X: Complete wave features dataset to analyze [pd Dataframe]
-features: Subset of features for analysis [list of strings]
-title: Name of preprocessing technique if used, or just Original data [string]
-labels: Labels assigned to each window [np array]
-scaler: Visualize the scaling behaviour [sklearn Scaling technnique - default=None (original data)]
+    - X: Complete wave features dataset to analyze [pd Dataframe]
+    - features: Subset of features for analysis [list of strings]
+    - title: Name of preprocessing technique if used, or just Original data [string]
+    - labels: Labels assigned to each window [np array]
+    - scaler: Visualize the scaling behaviour [sklearn Scaling technnique - default=None (original data)]
 '''
 def analyze(X, features, title, labels, scaler=None):
 
@@ -342,10 +361,10 @@ def analyze(X, features, title, labels, scaler=None):
     
     
 '''
-Function used in lab. Used in error analysis function
+    Function used in lab. Used in error analysis function
 '''
 def plot_learning_curve(sizes, train, val):
-    
+
     train_scores_mean = np.mean(train, axis=1)
     train_scores_std = np.std(train, axis=1)
     val_scores_mean = np.mean(val, axis=1)
@@ -378,7 +397,8 @@ def plot_learning_curve(sizes, train, val):
         sizes, val_scores_mean, "o-", color="r", label="Cross-validation score"
     )
     
-    axes.set_ylim((0,1))
+    axes.set_ylim(-0.26, -0.17)
+    
     axes.legend(loc="best")
     
     plt.title('Learning Curve')
@@ -388,12 +408,12 @@ def plot_learning_curve(sizes, train, val):
 
 
 '''
-error_analysis(model, Xtrain, Ytrain, cv)
+    error_analysis(model, Xtrain, Ytrain, cv)
 
-model: model pipeline used for error analysis [sklearn model pipeline]
-Xtrain: Training values [pd Dataframe]
-Ytrain: Training labels [pd Dataframe]
-cv: Cross validation technique used [sklearn technique]
+    - model: model pipeline used for error analysis [sklearn model pipeline]
+    - Xtrain: Training values [pd Dataframe]
+    - Ytrain: Training labels [pd Dataframe]
+    - cv: Cross validation technique used [sklearn technique]
 '''
             
 def error_analysis(model, Xtrain, Ytrain, cv):
@@ -406,7 +426,6 @@ def error_analysis(model, Xtrain, Ytrain, cv):
     
     # Plot the curve
     plot_learning_curve(train_sizes, train_scores, val_scores)
-    
 
     '''
     Error analysis
@@ -484,6 +503,152 @@ def error_analysis(model, Xtrain, Ytrain, cv):
     plt.title('Confusion Matrix')
     plt.show()
     
+    
+     
+"""
+    regression_error_analysis(model, Xtrain, Ytrain, cv)
+    
+    - model: Model pipeline used for error analysis [sklearn model pipeline]
+    - Xtrain: Training values [pd Dataframe]
+    - Ytrain: Training labels [pd Dataframe]
+    - cv: Cross validation technique used [sklearn technique]
+"""
+
+def regression_error_analysis(model, Xtrain, Ytrain, cv):
+
+    '''
+    Plotting learning curve
+    '''
+    # Get learning curve values
+    train_sizes, train_scores, val_scores = learning_curve(model, Xtrain, Ytrain, cv=cv, n_jobs=4, verbose=0)
+    
+    # Plot the curve
+    plot_learning_curve(train_sizes, train_scores, val_scores)
+
+
+    
+    '''
+    Residuals analysis
+    '''
+    # Get validation results from cross validation
+    YpredCV = cross_val_predict(model, Xtrain, Ytrain, cv=cv)
+
+    residuals = Ytrain - YpredCV
+
+    plt.figure(figsize=(9, 8))
+
+    plt.scatter(YpredCV, residuals, color='blue', marker='o', alpha=0.5)
+    plt.axhline(y=0, color='r', linestyle='--')
+    plt.title('Residual Plot')
+    plt.xlabel('Predicted Values')
+    plt.ylabel('Residuals')
+
+
+
+    # Extract the best regressor inside the model pipeline
+    regressor = model.best_estimator_.named_steps['regressor'][0]
+
+
+    
+    ''' 
+    Plot bar histogram of feature importance
+    '''
+
+    # Extract feature importance coefficients from the regression model
+    feature_importance = np.abs(regressor.coef_)
+    feature_names = np.array(Xtrain.columns)
+    
+    df = pd.DataFrame({'feature_names':feature_names,'feature_importance':feature_importance})
+    df.sort_values(by=['feature_importance'], ascending=True, inplace=True)
+    
+    plt.figure(figsize=(12, 18))
+    plt.barh(df['feature_names'], df['feature_importance'], color='green', alpha=0.7)
+    plt.title('Feature Importance')
+    plt.xlabel('Feature Importance')
+    plt.ylabel('Features')
+
+    plt.show()
+
+
+    
+    '''
+    Cross validation interval analysis
+    '''
+    residual_standard_error = np.std(residuals)
+
+    # Calculate the t-statistic for a desired confidence level (e.g., 95%)
+    confidence_level = 0.95
+    degrees_of_freedom = len(Xtrain) - 2  # Adjust for intercept and one predictor
+    t_statistic = t.ppf((1 + confidence_level) / 2, degrees_of_freedom)
+    
+    # Calculate the margin of error
+    margin_of_error = t_statistic * residual_standard_error
+    
+    # Construct the prediction interval
+    lower_bound = YpredCV - margin_of_error
+    upper_bound = YpredCV + margin_of_error
+
+    # Sort the indices of Ytrain, then adapt YpredCV and the respective margins of predictions
+    sorted_indices = np.lexsort((YpredCV, Ytrain))
+
+    Ytrain = Ytrain[sorted_indices]
+    YpredCV = YpredCV[sorted_indices]
+    
+    lower_bound = lower_bound[sorted_indices]
+    upper_bound = upper_bound[sorted_indices]
+
+    
+    # Visualize the prediction intervals
+    plt.figure(figsize=(30, 18))
+    plt.scatter(range(len(Ytrain)), Ytrain, label='Actual', color='blue', marker='o')
+    plt.scatter(range(len(YpredCV)), YpredCV, label='Predicted', color='orange', linestyle='-', marker = 'o')
+    plt.errorbar(range(len(YpredCV)), YpredCV, yerr=margin_of_error, fmt='o', color='orange', alpha=0.2, label='Prediction Interval')
+
+
+    # Text labels for Ytrain labels
+    Ylabels = np.linspace(-0.5, 0.5, 11)
+    
+    for i, Ypos in enumerate(Ylabels):
+        Xpos = len(Ytrain) // 11 * i + 30
+        plt.text(Xpos, -0.75 + i * 0.06, f'{Ypos:.1f}', fontsize=30, ha='center', va='center',color='b',weight = 'black')
+
+    plt.title('Prediction Intervals with Cross-Validation', fontsize=24)
+    
+    plt.xlabel('Data Point', fontsize=20)
+    plt.xticks(fontsize=17)
+    
+    plt.ylabel('Target Variablw', fontsize=20)
+    plt.yticks(fontsize=17)
+    
+    plt.legend(fontsize=17)
+    
+    plt.tight_layout()
+    plt.show()
+
+
+    
+    # '''
+    # Partial Dependence Plot
+    # '''
+    
+    # # Create partial dependence plot
+    # PartialDependenceDisplay.from_estimator(regressor, Xtrain, df['feature_names'].tail(1), grid_resolution=50)
+    # plt.suptitle(f'Partial Dependence Plot for Feature {feature_index}')
+    # plt.subplots_adjust(top=0.9)  # Adjust title position
+    # plt.show()
+
+
+    
+    ''' 
+    Display other useful error metrics
+    '''
+    mae_cv = mean_absolute_error(Ytrain, YpredCV)
+    mse_cv = mean_squared_error(Ytrain, YpredCV)
+    r2_cv = r2_score(Ytrain, YpredCV)
+
+    print(f'Cross-Validation Mean Absolute Error: {mae_cv:.4f}')
+    print(f'Cross-Validation Mean Squared Error: {mse_cv:.4f}')
+    print(f'Cross-Validation R-squared: {r2_cv:.4f}')
     
 '''
 predict_and_store(model, feature_extraction)
