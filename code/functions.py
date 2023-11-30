@@ -11,6 +11,9 @@ from scipy import integrate
 from scipy.fft import rfft
 from datetime import datetime
 from scipy.stats import *
+from sklearn.experimental import enable_iterative_imputer
+from sklearn.impute import IterativeImputer
+from sklearn.linear_model import LogisticRegression, Ridge
 
 '''
     load_features(vals)
@@ -59,10 +62,14 @@ def load_train_meta(vals = False):
 
     - vals: load as pd Dataframe or np 2d-array [boolean - default=False (df)]
 '''
-def load_wave_features(vals = False):
-    filename = 'wave_features'
-    filename = os.path.join('../data', filename + '.csv')
+def load_wave_features(vals = False, test = False):
     
+    if test:
+        filename = 'wave_features_test'
+    else:
+        filename = 'wave_features'
+        
+    filename = os.path.join('../data', filename + '.csv')
     features = pd.read_csv(filename)
     
     if vals:
@@ -179,19 +186,22 @@ def plot_series(start, end, low = False, high = False, acc = True):
     plt.show()
     
 '''
-    get_wave_stats(window_start, window_end, wave):
+    get_wave_stats(wave):
 
-    - window_start: wave window start index [integer]
-    - window_end: wave window end index [integer]
-    - wave: integer specifying which wave (low, high, acceleration) [integer - {0, 1, 2}]
+    - wave: integer specifying which wave (low, high, acceleration, speed, position, rfft_low, rfft_high, rfft_acceleration) [integer - {0, 1, 2, 3, 4, 5, 6, 7}]
 '''
-def get_wave_stats(window_start, window_end, wave, test=False):
-    
-    column_names = ['min_amplitude','max_amplitude', 'mean_aplitude', 'variance', 'q_25', 'median_amplitude', 'q_75', 'kurtosis', 'skewness', 'rms_amplitude', 'crest_factor']
-        
-    data_accumulator = []
+def get_wave_stats(wave, test=False):
 
-    for i in range(window_start, window_end):
+    column_names = ['min_amplitude','max_amplitude', 'mean_aplitude', 'variance', 'q_25', 'median_amplitude', 'q_75', 'kurtosis', 'skewness', 'rms_amplitude', 'crest_factor']
+
+    # Imputer for filling missing (NaN) values with regression
+    imputer = IterativeImputer(estimator=Ridge(), random_state=2211595)
+    
+    # EMpty dfs for data accumulation
+    compressed_df = pd.DataFrame()
+    hist_df = pd.DataFrame()
+    
+    for i in range(1100):
         
         if test:
             X = load_features(i, test=True)
@@ -200,61 +210,71 @@ def get_wave_stats(window_start, window_end, wave, test=False):
             X = load_features(i)
                 
         if wave == 3:
-            
+            # If wave index is 3, compute speed
             speed = np.real(integrate.cumulative_trapezoid(X[str(wave-1)], x = X.iloc[:,0]))
             X['3'] = pd.DataFrame(np.transpose(speed))
         
         elif wave == 4:
-            
+            # If wave index is 4, compute speed then position
             speed = np.real(integrate.cumulative_trapezoid(X[str(wave-2)], x = X.iloc[:,0]))            
             position = np.real(integrate.cumulative_trapezoid(speed, x = X.iloc[1:,0]))
             
             X['4'] = pd.DataFrame(np.transpose(position))        
         
         elif wave >= 5:
-            
+            # If wave index is greater than or equal to 5, compute the respective rfft of a wave (low, high, acc)
             rft = np.abs(rfft(X[str(wave-5)].values-np.mean(X[str(wave-5)].values)))
             X[str(wave)] = pd.DataFrame(np.transpose(rft))
 
-        
+        # Drop first useless column (Unnamed)
         X = X.drop(X.columns[0], axis=1)
 
+        # Counter to keep track of progress
         if i % 200 == 0:
-            print('Wave', wave, 'at index', i)
-        
-        sine_wave = X.iloc[:, min(wave,3)]
-        kurt = sine_wave.kurtosis()
-        
-        skewness = sine_wave.skew()
+            p = round(((wave * 1100) + i ) / 8800 * 100)
+            print(f'Wave {wave} at index {i} - Progress: {p}%' )
 
+        # Impute missing values by mean
+        X.iloc[:, min(wave,3)] = imputer.fit_transform(X.iloc[:, min(wave,3)].values.reshape(-1,1))
+        
+        # Extract the relevant wave 
+        sine_wave = X.iloc[:, min(wave,3)]
+
+        # Extract Compressed features from each wave
+        kurt = sine_wave.kurtosis()
+        skewness = sine_wave.skew()
         min_amplitude = np.min(sine_wave)
         max_amplitude = np.max(sine_wave)
-
         mean_amplitude = np.mean(sine_wave)
-
         variance = np.var(sine_wave)
-        
         q_25 = sine_wave.quantile(q=0.25)
         median_amplitude = sine_wave.quantile(q=0.5)
         q_75 = sine_wave.quantile(q=0.75)
-
         rms_amplitude = np.sqrt(np.mean(sine_wave**2))
-            
         crest_factor = max_amplitude / rms_amplitude
-    
-        row = [min_amplitude, max_amplitude, mean_amplitude, variance, q_25, median_amplitude, q_75, kurt, skewness,  rms_amplitude, crest_factor]
-        
-        data_accumulator.append(row)
 
+        # Create list of features to then create a df with the according columns 
+        compressed = [min_amplitude, max_amplitude, mean_amplitude, variance, q_25, median_amplitude, q_75, kurt, skewness,  rms_amplitude, crest_factor]
+        compressed_features = pd.DataFrame([compressed], columns=[f'{col}' for col in column_names])
+
+        compressed_df = pd.concat([compressed_df, compressed_features], axis = 0)
+        
+        # Create the histogram of the wave, then create a df with the according columns
+        hist, bin_edges = np.histogram(sine_wave, bins=1100)
+        hist_features = pd.DataFrame([hist], columns=[f'h{col}' for col in range(len(hist))])
+            
+        # hist_features.columns = [waves[wave] + '_' + col for col in hist_features.columns]
+        hist_df = pd.concat([hist_df, hist_features], axis = 0)
+
+    # Concatenate the 2 dataframes into a final feature set for a specific wave     
+    wave_df = pd.concat([compressed_df, hist_df], axis=1)
     
-    df = pd.DataFrame(data_accumulator, columns=column_names)
-    
-    return df
+    return wave_df
 
 '''
     store_wave_features(store)
 
-    - store: Stores the obtained wave features in a excel file (works if file does not exist) [boolean - default=False]
+    - store: Stores the obtained wave features in a excel file [boolean - default=False]
 '''
 def store_wave_features(store = False, test=False):
     
@@ -262,19 +282,20 @@ def store_wave_features(store = False, test=False):
     df = pd.DataFrame()
     
     for i in range(len(waves)):
-        if test:
-            wave_stats = get_wave_stats(0, 1100, i, True)
-        
-        else:
-            wave_stats = get_wave_stats(0, 1100, i, False)
+        wave_stats = get_wave_stats(i, test=test)
             
         wave_stats.columns = [waves[i] + '_' + col for col in wave_stats.columns]
         df = pd.concat([df, wave_stats], axis = 1)
 
-    
-    if store:
+    if store and test:
+        file_path = '..//data//wave_features_test.csv'
+        df.to_csv(file_path, index=True, mode='w')
+        
+    elif store:
         file_path = '..//data//wave_features.csv'
         df.to_csv(file_path, index=True, mode='w')
+    
+    print("\n-----Done-----")
     
     return df
 
@@ -660,7 +681,7 @@ feature_extraction: Function used to extract features from training data [python
 def predict_and_store(model, feature_extraction):
     
     # Loads test data and extract the features, similarl to the train data
-    Xtest = feature_extraction(store = False, test=False)    
+    Xtest = feature_extraction(store = False, test = True)    
     
     # Use the model to make the predictions based on the test data
     Ytest = model.predict(Xtest)
