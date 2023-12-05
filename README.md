@@ -7,3 +7,10 @@
 
 [Kaggle link](https://www.kaggle.com/competitions/ml-challenge-2023-misalignment-detection)
 
+[Higuchi Fractal Dimension Analysis](https://pypi.org/project/hfda/)
+
+[Hurst Exponent](https://pypi.org/project/hurst/#:~:text=hurst-,Hurst%20exponent%20evaluation%20and%20R%2FS-analysis,0.5%20%E2%80%94%20anti-persistent%20behavior.)
+
+[scikit-learn Ensemble](https://scikit-learn.org/stable/modules/classes.html#module-sklearn.ensemble)
+
+[Entropy](https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.entropy.html)
