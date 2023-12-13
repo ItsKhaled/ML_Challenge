@@ -1,19 +1,23 @@
 import os
+import hfda
 import numpy as np
 import pandas as pd
+import seaborn as sns
 import matplotlib.pyplot as plt
 
-from matplotlib.colors import LinearSegmentedColormap
-from matplotlib.lines import Line2D
-from sklearn.model_selection import *
-from sklearn.metrics import *
-from scipy import integrate
-from scipy.fft import rfft
-from datetime import datetime
+from scipy.fft import *
 from scipy.stats import *
+from scipy import integrate
+from hurst import compute_Hc
+from datetime import datetime
 from sklearn.experimental import enable_iterative_imputer
 from sklearn.impute import IterativeImputer
-from sklearn.linear_model import LogisticRegression, Ridge
+from sklearn.linear_model import Ridge
+from sklearn.model_selection import *
+from sklearn.metrics import *
+from matplotlib.colors import LinearSegmentedColormap
+from matplotlib.lines import Line2D
+
 
 '''
     load_features(vals)
@@ -22,7 +26,6 @@ from sklearn.linear_model import LogisticRegression, Ridge
     - test: returns test values instead of train [boolean - default=False]
     - vals: load as pd Dataframe or np 2d-array [boolean - default=False (df)]
 '''
-
 def load_features(n, test = False, vals = False):
     
     if test:
@@ -41,6 +44,7 @@ def load_features(n, test = False, vals = False):
 
     return features
 
+
 '''
     load_train_meta(vals)
 
@@ -57,6 +61,7 @@ def load_train_meta(vals = False):
         
     return features
 
+
 '''
     load_wave_features(vals)
 
@@ -65,9 +70,9 @@ def load_train_meta(vals = False):
 def load_wave_features(vals = False, test = False):
     
     if test:
-        filename = 'wave_features_test'
+        filename = 'compressed_test'
     else:
-        filename = 'wave_features'
+        filename = 'compressed'
         
     filename = os.path.join('../data', filename + '.csv')
     features = pd.read_csv(filename)
@@ -76,6 +81,7 @@ def load_wave_features(vals = False, test = False):
         features = features.values[:, 1:]
 
     return features.iloc[: , 1:]
+
 
 ''' 
     plot_sorted_counts(data, label, xtick, rot, sorted, coloring)
@@ -100,14 +106,15 @@ def plot_sorted_counts(data, label, xtick=True, rot=90, sorted=True, coloring=No
         
     # Count values without sorting
     else:
-        values, counts = np.unique(data, return_counts=True)
+        values = np.unique(data, return_counts=True)[0].astype(str)
+        counts = np.unique(data, return_counts=True)[1]
         print(values,counts)
 
     # Adjust size
-    plt.figure(figsize=(10, 6))
+    plt.figure(figsize=(14, 7))
     
     ax = plt.axes()
-    ax.set_facecolor("g")
+    # ax.set_facecolor("g")
 
     # Adjust title
     title = ''
@@ -118,33 +125,47 @@ def plot_sorted_counts(data, label, xtick=True, rot=90, sorted=True, coloring=No
         title += " counts"
 
     # Adjust coloring based on parameter (depending on what we want to show)
-    color_cycle = plt.cm.flag
-    
+    color_cycle = sns.color_palette("rocket", as_cmap=True)
+
+
+    # print(color_cycle(0.1))
     if coloring == 'dir':
-        bar_color = [color_cycle(0) if val.startswith('H') else color_cycle(0.3) for val in values]
+        bar_color = [color_cycle(0.3) if 'H' in val else color_cycle(0.3) for val in values]
         title += " colored based on direction"
         
     elif coloring == 'spd':
-        bar_color = [color_cycle(0) if val.endswith('425') else color_cycle(0.3) for val in values]
+        bar_color = [color_cycle(0.3) if val.endswith('425') else color_cycle(0.7) for val in values]
         title += " colored based on speed"
-
+        
+    elif coloring == 'grp':
+        
+        bar_color = []
+        for val in values:
+            
+            grp = val.split('_')[0]
+            bar_color += [color_cycle((-float(grp)+0.5))]
+            
+    # bar_color = [color_cycle(0.3) if val.endswith('425') else color_cycle(0.7) for val in values]
+        title += " colored based on label"
     else:
-        bar_color = color_cycle(np.linspace(0, 1, len(values)))
+        bar_color = color_cycle(np.linspace(0.7, 0.7, len(values)))
 
     # Plot bars
     plt.bar(values, counts, color=bar_color)   
 
     # Plot title
-    plt.title(label + title)
+    plt.title(label + title, fontsize = 15)
 
     # Adjust Xticks
     if xtick:
-        plt.xlabel(label)
-        plt.xticks(rotation=rot, fontsize=7.5)
+        plt.xlabel(label, fontsize = 15)
+        plt.xticks(rotation=rot, fontsize=15)
     else:
         plt.xticks([], [])
-
-    plt.ylabel('Counts')
+    
+    
+    plt.ylabel('Counts', fontsize = 15)
+    plt.yticks(fontsize=15)
 
     plt.show()
     
@@ -158,7 +179,6 @@ def plot_sorted_counts(data, label, xtick=True, rot=90, sorted=True, coloring=No
     - high: plot high wave [boolean - default=False]
     - acc: plot acceleration wave [boolean - default=True]
 '''
-
 def plot_series(start, end, low = False, high = False, acc = True):
     
     plt.figure(figsize=(12, 8))
@@ -185,21 +205,24 @@ def plot_series(start, end, low = False, high = False, acc = True):
     plt.legend()
     plt.show()
     
+    
 '''
     get_wave_stats(wave):
 
     - wave: integer specifying which wave (low, high, acceleration, speed, position, rfft_low, rfft_high, rfft_acceleration) [integer - {0, 1, 2, 3, 4, 5, 6, 7}]
 '''
-def get_wave_stats(wave, test=False):
+def get_compressed(wave, test=False):
 
-    column_names = ['min_amplitude','max_amplitude', 'mean_aplitude', 'variance', 'q_25', 'median_amplitude', 'q_75', 'kurtosis', 'skewness', 'rms_amplitude', 'crest_factor']
+    column_names = ['min_amplitude','max_amplitude', 'mean_aplitude', 'variance', 'stdiv', 'absdev','q_25', 'median_amplitude', 'q_75', 'kurtosis', 'skewness', 'H', 'C', 'rms_amplitude', 'crest_factor', 'HFD']
 
+    if wave < 5:
+        column_names += ['entropy']
+        
     # Imputer for filling missing (NaN) values with regression
     imputer = IterativeImputer(estimator=Ridge(), random_state=2211595)
     
-    # EMpty dfs for data accumulation
+    # Empty dfs for data accumulation
     compressed_df = pd.DataFrame()
-    hist_df = pd.DataFrame()
     
     for i in range(1100):
         
@@ -221,18 +244,21 @@ def get_wave_stats(wave, test=False):
             
             X['4'] = pd.DataFrame(np.transpose(position))        
         
-        elif wave >= 5:
+        elif wave >= 5 and wave < 8:
             # If wave index is greater than or equal to 5, compute the respective rfft of a wave (low, high, acc)
-            rft = np.abs(rfft(X[str(wave-5)].values-np.mean(X[str(wave-5)].values)))
+            rft = np.real(fft(X[str(wave-5)].values-np.mean(X[str(wave-5)].values)))
             X[str(wave)] = pd.DataFrame(np.transpose(rft))
+
+        elif wave >= 8:
+            phase = np.imag(fft(X[str(wave-8)].values-np.mean(X[str(wave-8)].values)))
+            X[str(wave)] = pd.DataFrame(np.transpose(phase))
 
         # Drop first useless column (Unnamed)
         X = X.drop(X.columns[0], axis=1)
 
         # Counter to keep track of progress
         if i % 200 == 0:
-            p = round(((wave * 1100) + i ) / 8800 * 100)
-            print(f'Wave {wave} at index {i} - Progress: {p}%' )
+            print(f'Wave {wave} at index {i}' )
 
         # Impute missing values by mean
         X.iloc[:, min(wave,3)] = imputer.fit_transform(X.iloc[:, min(wave,3)].values.reshape(-1,1))
@@ -247,56 +273,153 @@ def get_wave_stats(wave, test=False):
         max_amplitude = np.max(sine_wave)
         mean_amplitude = np.mean(sine_wave)
         variance = np.var(sine_wave)
+        stdev = tstd(sine_wave)
+        absdev = median_abs_deviation(sine_wave)
         q_25 = sine_wave.quantile(q=0.25)
         median_amplitude = sine_wave.quantile(q=0.5)
         q_75 = sine_wave.quantile(q=0.75)
         rms_amplitude = np.sqrt(np.mean(sine_wave**2))
         crest_factor = max_amplitude / rms_amplitude
-
+        H, C, data = compute_Hc(sine_wave, kind='change', simplified = True)
+        HFD = hfda.measure(sine_wave, 8)
+        
         # Create list of features to then create a df with the according columns 
-        compressed = [min_amplitude, max_amplitude, mean_amplitude, variance, q_25, median_amplitude, q_75, kurt, skewness,  rms_amplitude, crest_factor]
+        compressed = [min_amplitude, max_amplitude, mean_amplitude, variance, stdev, absdev, q_25, median_amplitude, q_75, kurt, skewness, H, C, rms_amplitude, crest_factor, HFD]
+        
+        if wave < 5:
+            entropy = differential_entropy(sine_wave)
+            compressed += [entropy]
+            
         compressed_features = pd.DataFrame([compressed], columns=[f'{col}' for col in column_names])
 
         compressed_df = pd.concat([compressed_df, compressed_features], axis = 0)
+
+    wave_df = pd.concat([compressed_df], axis=1)
+    
+    return wave_df
+
+
+'''
+    store_comp_features(store)
+
+    - store: Stores the obtained wave features in a excel file [boolean - default=False]
+'''
+def store_comp_features(store = False, test=False):
+
+    waves = ['low', 'high', 'acc', 'speed', 'pos', 'fft_low', 'fft_high', 'fft_acc', 'phase_low','phase_high','phase_acc']
+    df = pd.DataFrame()
+
+    for i in range(len(waves)):
+        wave_stats = get_compressed(i, test=test)
+
+        wave_stats.columns = [waves[i] + '_' + col for col in wave_stats.columns]
+        df = pd.concat([df, wave_stats], axis = 1)
+
+    if store and test:
+        file_path = '..//data//compressed_test.csv'
+        df.to_csv(file_path, index=True, mode='w')
+
+    elif store:
+        file_path = '..//data//compressed.csv'
+        df.to_csv(file_path, index=True, mode='w')
+
+    print("\n-----Done-----")
+
+    return df
+
+
+'''
+    get_wave_stats(wave):
+
+    - wave: integer specifying which wave (low, high, acceleration, speed, position, rfft_low, rfft_high, rfft_acceleration) [integer - {0, 1, 2, 3, 4, 5, 6, 7}]
+'''
+def get_hist(wave, test=False):
+
+    # Empty dfs for data accumulation
+    hist_df = pd.DataFrame()
+    
+    # Imputer for filling missing (NaN) values with regression
+    imputer = IterativeImputer(estimator=Ridge(), random_state=2211595)
+    
+    
+    for i in range(1100):
+        
+        if test:
+            X = load_features(i, test=True)
+            
+        else:
+            X = load_features(i)
+                
+        if wave == 3:
+            # If wave index is 3, compute speed
+            speed = np.real(integrate.cumulative_trapezoid(X[str(wave-1)], x = X.iloc[:,0]))
+            X['3'] = pd.DataFrame(np.transpose(speed))
+        
+        elif wave == 4:
+            # If wave index is 4, compute speed then position
+            speed = np.real(integrate.cumulative_trapezoid(X[str(wave-2)], x = X.iloc[:,0]))            
+            position = np.real(integrate.cumulative_trapezoid(speed, x = X.iloc[1:,0]))
+            
+            X['4'] = pd.DataFrame(np.transpose(position))        
+        
+        elif wave >= 5 and wave < 8:
+            # If wave index is greater than or equal to 5, compute the respective rfft of a wave (low, high, acc)
+            rft = np.real(fft(X[str(wave-5)].values-np.mean(X[str(wave-5)].values)))
+            X[str(wave)] = pd.DataFrame(np.transpose(rft))
+
+        elif wave >= 8:
+            phase = np.imag(fft(X[str(wave-8)].values-np.mean(X[str(wave-8)].values)))
+            X[str(wave)] = pd.DataFrame(np.transpose(phase))
+
+        # Drop first useless column (Unnamed)
+        X = X.drop(X.columns[0], axis=1)
+
+        # Counter to keep track of progress
+        if i % 200 == 0:
+            print(f'Wave {wave} at index {i}' )
+
+        X.iloc[:, min(wave,3)] = imputer.fit_transform(X.iloc[:, min(wave,3)].values.reshape(-1,1))
+
+        # Extract the relevant wave 
+        sine_wave = X.iloc[:, min(wave,3)]
         
         # Create the histogram of the wave, then create a df with the according columns
         hist, bin_edges = np.histogram(sine_wave, bins=1100)
         hist_features = pd.DataFrame([hist], columns=[f'h{col}' for col in range(len(hist))])
             
-        # hist_features.columns = [waves[wave] + '_' + col for col in hist_features.columns]
         hist_df = pd.concat([hist_df, hist_features], axis = 0)
 
-    # Concatenate the 2 dataframes into a final feature set for a specific wave     
-    wave_df = pd.concat([compressed_df, hist_df], axis=1)
+    wave_df = pd.concat([hist_df], axis=1)
     
     return wave_df
 
-'''
-    store_wave_features(store)
 
-    - store: Stores the obtained wave features in a excel file [boolean - default=False]
 '''
-def store_wave_features(store = False, test=False):
-    
-    waves = ['low', 'high', 'acc', 'spd', 'pos', 'rft0', 'rft1', 'rft2']
+    store_hist_features(store)
+
+    - store: Stores the obtained histogram features in a excel file [boolean - default=False]
+'''
+def store_hist_features(store = False, test=False):
+
+    waves = ['low', 'high', 'acc', 'speed', 'pos', 'fft_low', 'fft_high', 'fft_acc', 'phase_low','phase_high','phase_acc']
     df = pd.DataFrame()
-    
+
     for i in range(len(waves)):
-        wave_stats = get_wave_stats(i, test=test)
-            
+        wave_stats = get_hist(i, test=test)
+
         wave_stats.columns = [waves[i] + '_' + col for col in wave_stats.columns]
         df = pd.concat([df, wave_stats], axis = 1)
 
     if store and test:
-        file_path = '..//data//wave_features_test.csv'
+        file_path = '..//data//histogram_test.csv'
         df.to_csv(file_path, index=True, mode='w')
-        
+
     elif store:
-        file_path = '..//data//wave_features.csv'
+        file_path = '..//data//histogram.csv'
         df.to_csv(file_path, index=True, mode='w')
-    
+
     print("\n-----Done-----")
-    
+
     return df
 
 
@@ -323,7 +446,7 @@ def get_correlations(X):
     
     for col1, col2, correlation_value in correlation_list:
         print(f"Columns: {col1} and {col2} - Correlation: {correlation_value}")
-        
+    
         
 '''
     analyze(X, features, title, labels, scaler)
@@ -347,13 +470,14 @@ def analyze(X, features, title, labels, scaler=None):
 
     # Relevant variables for plotting
     n = len(features)
-    ids = np.arange(1100)
+    ids = np.arange(len(X))
 
     # Adjust size if needed, Width x Height
-    plt.figure(figsize=(12, 50))
+    plt.figure(figsize=(12, 65))
+    
 
     # Set custom colormap
-    base_cmap = plt.get_cmap('bwr')
+    base_cmap = sns.color_palette("rocket", as_cmap=True)
     
     lower_color = base_cmap(1.0)
     upper_color = base_cmap(0.0)
@@ -366,16 +490,25 @@ def analyze(X, features, title, labels, scaler=None):
         
         # Create subplots with black backgrounds
         ax = plt.subplot(n, 1, i + 1)
-        ax.set_facecolor('black')
+        ax.set_facecolor('gray')
 
         # Scatter plot with the modified colormap
-        scatter = ax.scatter(ids, d[features[i]], marker='o', c=labels, cmap=cmap_segments, vmin=-0.5, vmax=0.5)
+        scatter = ax.scatter(ids, d[features[i]], marker= 'o', c=labels, cmap=cmap_segments, vmin=-0.5, vmax=0.5)
 
         # Add colorbar
         cbar = plt.colorbar(scatter, orientation='vertical')
         cbar.set_label('Labels')
 
-        plt.title(title + ' - ' + features[i])
+    
+        # plt.xlabel(fontsize=17)
+        plt.xticks(fontsize=17)
+        
+        # plt.ylabel(fontsize=17)
+        plt.yticks(fontsize=17)
+        
+        # plt.legend(fontsize=17)
+        
+        plt.title(title + ' - ' + features[i], fontsize=20)
 
     plt.tight_layout()
     plt.show()
@@ -418,7 +551,7 @@ def plot_learning_curve(sizes, train, val):
         sizes, val_scores_mean, "o-", color="r", label="Cross-validation score"
     )
     
-    axes.set_ylim(-0.26, -0.17)
+    axes.set_ylim(-0.5, 0.1)
     
     axes.legend(loc="best")
     
@@ -435,8 +568,7 @@ def plot_learning_curve(sizes, train, val):
     - Xtrain: Training values [pd Dataframe]
     - Ytrain: Training labels [pd Dataframe]
     - cv: Cross validation technique used [sklearn technique]
-'''
-            
+'''   
 def error_analysis(model, Xtrain, Ytrain, cv):
     
     '''
@@ -576,19 +708,24 @@ def regression_error_analysis(model, Xtrain, Ytrain, cv):
     '''
 
     # Extract feature importance coefficients from the regression model
-    feature_importance = np.abs(regressor.coef_)
-    feature_names = np.array(Xtrain.columns)
     
-    df = pd.DataFrame({'feature_names':feature_names,'feature_importance':feature_importance})
-    df.sort_values(by=['feature_importance'], ascending=True, inplace=True)
+    # ONLY FOR LINEAR REGRESSION
     
-    plt.figure(figsize=(12, 18))
-    plt.barh(df['feature_names'], df['feature_importance'], color='green', alpha=0.7)
-    plt.title('Feature Importance')
-    plt.xlabel('Feature Importance')
-    plt.ylabel('Features')
-
-    plt.show()
+    # feature_importance = np.abs(regressor.coef_)
+    # feature_names = np.array(Xtrain.columns)
+    # print(len(feature_names),len(feature_importance))
+    # df = pd.DataFrame({'feature_names':feature_names,'feature_importance':feature_importance})
+    # df.sort_values(by=['feature_importance'], ascending=True, inplace=True)
+    
+    # plt.figure(figsize=(12, 12))
+    # plt.barh(df['feature_names'][-20:], df['feature_importance'][-20:], color='green', alpha=0.7)
+    # plt.subplots_adjust(left=0.25) 
+    # plt.title('Feature Importance of 20 most important features', fontsize=15)
+    # plt.xlabel('Feature Importance', fontsize=15)
+    # plt.ylabel('Features', fontsize=15)
+    # plt.yticks(fontsize=15)
+    # plt.xticks(fontsize=15)
+    # plt.show()
 
 
     
@@ -648,18 +785,6 @@ def regression_error_analysis(model, Xtrain, Ytrain, cv):
 
 
     
-    # '''
-    # Partial Dependence Plot
-    # '''
-    
-    # # Create partial dependence plot
-    # PartialDependenceDisplay.from_estimator(regressor, Xtrain, df['feature_names'].tail(1), grid_resolution=50)
-    # plt.suptitle(f'Partial Dependence Plot for Feature {feature_index}')
-    # plt.subplots_adjust(top=0.9)  # Adjust title position
-    # plt.show()
-
-
-    
     ''' 
     Display other useful error metrics
     '''
@@ -671,6 +796,7 @@ def regression_error_analysis(model, Xtrain, Ytrain, cv):
     print(f'Cross-Validation Mean Squared Error: {mse_cv:.4f}')
     print(f'Cross-Validation R-squared: {r2_cv:.4f}')
     
+    
 '''
 predict_and_store(model, feature_extraction)
 model: Best model pipeline after training, used for predicting [sklearn model pipeline]
@@ -678,11 +804,8 @@ feature_extraction: Function used to extract features from training data [python
 ''' 
 ## WARNING: The 'feature_extraction' parameter currently only works on my own function
 ##          because of the specified parameters of the function I used
-def predict_and_store(model, feature_extraction):
-    
-    # Loads test data and extract the features, similarl to the train data
-    Xtest = feature_extraction(store = False, test = True)    
-    
+def predict_and_store(model, Xtest):
+        
     # Use the model to make the predictions based on the test data
     Ytest = model.predict(Xtest)
     
@@ -699,3 +822,6 @@ def predict_and_store(model, feature_extraction):
     
     # Store the file in the submission folder
     predictions.to_csv(os.path.join(output_directory, output_filename), index=False)
+
+
+
